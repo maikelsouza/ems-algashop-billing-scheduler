@@ -53,6 +53,10 @@ public class CancelExpiredInvoicesApplicationServiceJDBCImpl implements CancelEx
         transactionTemplate.execute(status -> {
             List<UUID> invoiceIds = fetchExpiredInvoices();
             log.info("Tasks - Total invoices fetched: {}", invoiceIds.size());
+            if (invoiceIds.isEmpty()){
+                log.info("Tasks - No expired invoices found for cancellation");
+                return true;
+            }
             int totalCanceledInvoices = cancelInvoices(invoiceIds);
             log.info("Tasks - Total invoices canceled: {}", totalCanceledInvoices);
             return true;
@@ -61,17 +65,22 @@ public class CancelExpiredInvoicesApplicationServiceJDBCImpl implements CancelEx
     }
 
     private int cancelInvoices(List<UUID> invoiceIds){
-        int updatedInvoices = 0;
-        for (UUID invoiceId: invoiceIds){
-            try {
-                jdbcOperations.update(UPDATE_INVOICE_STATUS_SQL, CANCELED_STATUS, CANCELED_REASON, invoiceId);
-                updatedInvoices++;
-                log.info("Task - Invoice canceled ID {}", invoiceId);
-            } catch (DataAccessException e){
-                log.error("Task - Failed to canceled invoice with ID {}", invoiceId, e);
-            }
+        try {
+            jdbcOperations.batchUpdate(UPDATE_INVOICE_STATUS_SQL,
+                    invoiceIds,
+                    invoiceIds.size(),
+                    (ps, id) ->{
+                        ps.setString(1, CANCELED_STATUS);
+                        ps.setString(2, CANCELED_REASON);
+                        ps.setObject(3, id);
+                    });
+            log.info("Task - Invoices canceled ID {}", invoiceIds);
+            return invoiceIds.size();
+        } catch (DataAccessException e){
+            log.error("Task - Failed to canceled invoices with ID {}", invoiceIds, e);
         }
-        return updatedInvoices;
+        return 0;
+
     }
 
     private List<UUID> fetchExpiredInvoices(){
